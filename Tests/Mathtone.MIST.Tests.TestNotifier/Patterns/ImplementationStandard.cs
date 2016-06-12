@@ -73,17 +73,21 @@ namespace Mathtone.MIST.TestNotifier.Patterns {
         public int ChangeCount => Changes.Count;
         public List<string> Changes { get; } = new List<string>();
 
-        public string StringValue {
-			get { return stringValue; }
-			set {
-				var tValue = StringValue;
-                stringValue = value;
-                if (!tValue?.Equals(value) ?? (value != null))
+        public string StringValue
+        {
+            get { return stringValue; }
+            set
+            {
+                var V_0 = StringValue;
+                SetStringValue(value);
+                var V_1 = StringValue;
+                if (!V_0?.Equals(V_1) ?? (V_1 != null))
                 {
                     OnPropertyChanged("StringValue");
-				}
-			}
-		}
+                }
+            }
+        }
+        private void SetStringValue(string value) { stringValue = value; }
 
 		public int IntValue {
 			get { return intValue; }

@@ -136,7 +136,6 @@ namespace Mathtone.MIST.Processors {
 
         private static IEnumerable<Instruction> ImplementWrapped_OnChange(ILProcessor msil, ImplementationStrategy strategy, MethodDefinition originalSetMethod, MethodDefinition newSetMethod)
         {
-            var boolType = strategy.Property.Module.ImportReference(typeof(bool));
 				
 
             var propertyType = strategy.Property.PropertyType.Resolve();
@@ -152,32 +151,23 @@ namespace Mathtone.MIST.Processors {
 
             var equalityReference = equalsMethod.Resolve();
 
-            var v1 = new VariableDefinition(strategy.Property.PropertyType);
-            var v2 = new VariableDefinition(boolType);
-            var v3 = new VariableDefinition(boolType);
-
-            newSetMethod.Body.Variables.Add(v1);
-            newSetMethod.Body.Variables.Add(v2);
-            newSetMethod.Body.Variables.Add(v3);
-
-            var instructions = new List<Instruction>();
+            IEnumerable<Instruction> instructions;
             var rtn = msil.Create(OpCodes.Ret);
             if (propertyType.IsPrimitive)
             {
-                instructions.AddRange(ImplementWrapped_InChange_Primitive(msil, strategy, originalSetMethod, equality, rtn));
+                instructions = ImplementWrapped_InChange_Primitive(msil, strategy, originalSetMethod, equality, rtn);
             }
             else
             {
-                instructions.AddRange(ImplementWrapped_OnChange_ComplexType(msil, strategy, originalSetMethod, equality, equalityReference, rtn));
+                instructions = ImplementWrapped_OnChange_ComplexType(msil, strategy, originalSetMethod, equality, equalityReference, rtn);
             };
 
-            instructions.AddRange(CallNotifyTargetInstructions(msil, strategy));
-            instructions.Add(msil.Create(OpCodes.Nop));
-            instructions.Add(rtn);
-            return instructions;
+            return instructions
+                .Concat(CallNotifyTargetInstructions(msil, strategy))
+                .Concat(new[] { msil.Create(OpCodes.Nop), rtn });
         }
 
-        private static Instruction[] ImplementWrapped_InChange_Primitive(ILProcessor msil, ImplementationStrategy strategy, MethodDefinition originalSetMethod, MethodReference equality, Instruction rtn)
+        private static IEnumerable<Instruction> ImplementWrapped_InChange_Primitive(ILProcessor msil, ImplementationStrategy strategy, MethodDefinition originalSetMethod, MethodReference equality, Instruction rtn)
         {
             return new[] {
                 //msil.Create(OpCodes.Nop),
@@ -203,27 +193,60 @@ namespace Mathtone.MIST.Processors {
             };
         }
 
-        private static Instruction[] ImplementWrapped_OnChange_ComplexType(ILProcessor msil, ImplementationStrategy strategy, MethodDefinition originalSetMethod, MethodReference equality, MethodDefinition equalityReference, Instruction rtn)
+        private static IEnumerable<Instruction> ImplementWrapped_OnChange_ComplexType(ILProcessor msil, ImplementationStrategy strategy, MethodDefinition originalSetMethod, MethodReference equality, MethodDefinition equalityReference, Instruction rtn)
         {
-            return new[] {
-                //msil.Create(OpCodes.Nop),
-                //msil.Create(OpCodes.Ldarg_0),
-                //msil.Create(OpCodes.Call,strategy.Property.GetMethod),
-                //msil.Create(OpCodes.Stloc_0),
+            //Register needed variables
+            var boolType = strategy.Property.Module.ImportReference(typeof(bool));
+            msil.Body.Variables.Add(new VariableDefinition(strategy.Property.PropertyType));
+            msil.Body.Variables.Add(new VariableDefinition(strategy.Property.PropertyType));
+            msil.Body.Variables.Add(new VariableDefinition(boolType));
 
+            //Code working for objects that implement Equals
+            var IL_0020 = new[]
+            {
+                msil.Create(OpCodes.Ldloc_0),
+                msil.Create(OpCodes.Ldloc_1),
+                msil.Create(equalityReference.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, equality),
+                msil.Create(OpCodes.Ldc_I4_0),
+                msil.Create(OpCodes.Ceq)
+            };
+            var IL_002a = new[]
+            {
+                msil.Create(OpCodes.Stloc_2),
+                msil.Create(OpCodes.Ldloc_2),
+                msil.Create(OpCodes.Brfalse_S, rtn),
+                msil.Create(OpCodes.Nop)
+            };
+
+            return new[] {
+                msil.Create(OpCodes.Nop),
+
+                //V_0 = Property-Get
+                msil.Create(OpCodes.Ldarg_0),
+                msil.Create(OpCodes.Call, strategy.Property.GetMethod),
+                msil.Create(OpCodes.Stloc_0),
+
+                //Original Property-Set = value
                 msil.Create(OpCodes.Ldarg_0),
                 msil.Create(OpCodes.Ldarg_1),
                 msil.Create(OpCodes.Call, originalSetMethod),
 
-                //msil.Create(OpCodes.Nop),
-                //msil.Create(OpCodes.Ldloc_0),
-                //msil.Create(OpCodes.Ldarg_1),
-                //msil.Create(equalityReference.IsVirtual? OpCodes.Callvirt:OpCodes.Call,equality),
-                //msil.Create(OpCodes.Stloc_1),
-                //msil.Create(OpCodes.Ldloc_1),
-                //msil.Create(OpCodes.Brfalse_S,rtn),
-                //msil.Create(OpCodes.Nop)
-            };
+                //V_1 = Property-Get
+                msil.Create(OpCodes.Nop),
+                msil.Create(OpCodes.Ldarg_0),
+                msil.Create(OpCodes.Call, strategy.Property.GetMethod),
+                msil.Create(OpCodes.Stloc_1),
+
+                //if (!V_0?.Equals(V_1) ?? (V_1 != null))
+                msil.Create(OpCodes.Ldloc_0),
+                msil.Create(OpCodes.Brtrue_S, IL_0020.First()),
+                msil.Create(OpCodes.Ldloc_1),
+                msil.Create(OpCodes.Ldnull),
+                msil.Create(OpCodes.Cgt_Un),
+                msil.Create(OpCodes.Br_S, IL_002a.First()),
+            }
+            .Concat(IL_0020)
+            .Concat(IL_002a);
         }
 
         static IEnumerable<MethodDefinition> GetMethods(TypeDefinition type, Func<MethodDefinition, bool> evaluator) =>
