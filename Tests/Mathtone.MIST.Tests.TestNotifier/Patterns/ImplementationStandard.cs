@@ -92,13 +92,32 @@ namespace Mathtone.MIST.TestNotifier.Patterns {
 		public int IntValue {
 			get { return intValue; }
 			set {
-				var tValue = IntValue;
-                intValue = value;
-                if (!tValue.Equals(value)) {
+				var V_0 = IntValue;
+                SetIntValue(value);
+                var V_1 = IntValue;
+                if (!V_0.Equals(V_1)) {
 					OnPropertyChanged("IntValue");
 				}
 			}
 		}
+        private void SetIntValue(int value) { intValue = value; }
+
+        public int? NullableIntValue
+        {
+            get { return _nullableIntValue; }
+            set
+            {
+                var V_0 = NullableIntValue;
+                SetNullableIntValue(value);
+                var V_1 = NullableIntValue;
+                if (!V_0?.Equals(V_1) ?? (V_1 != null))
+                {
+                    OnPropertyChanged("NullableIntValue");
+                }
+            }
+        }
+        private void SetNullableIntValue(int? value) { _nullableIntValue = value; }
+        int? _nullableIntValue;
 
         public Cases.RefObjectOverrideEquals TestValue
         {

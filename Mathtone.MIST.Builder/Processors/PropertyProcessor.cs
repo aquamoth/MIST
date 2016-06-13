@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Mathtone.MIST;
 using Mono.Cecil.Cil;
 using System.Reflection;
+using Mathtone.MIST.Helpers;
 
 namespace Mathtone.MIST.Processors {
 
@@ -141,14 +142,8 @@ namespace Mathtone.MIST.Processors {
             var propertyType = strategy.Property.PropertyType.Resolve();
 
             //find equals method
-            var equalsMethod = SeekMethod(
-                propertyType,
-                a =>
-                    a.Name == "Equals" &&
-                    a.Parameters.Count == 1
-            );
+            var equalsMethod = SeekMethod(propertyType, a => a.Name == "Equals" && a.Parameters.Count == 1);
             var equality = strategy.Property.Module.ImportReference(equalsMethod);
-
             var equalityReference = equalsMethod.Resolve();
 
             IEnumerable<Instruction> instructions;
@@ -157,9 +152,22 @@ namespace Mathtone.MIST.Processors {
             {
                 instructions = ImplementWrapped_InChange_Primitive(msil, strategy, originalSetMethod, equality, rtn);
             }
+            else if (!propertyType.IsValueType)
+            {
+                instructions = ImplementWrapped_OnChange_ReferenceType(msil, strategy, originalSetMethod, equality, equalityReference, rtn);
+            }
+            else if (SeekMethod(propertyType, a => a.Name == "get_HasValue" && a.Parameters.Count == 0) != null)
+            {
+                instructions = ImplementWrapped_OnChange_NullableValueType(msil, strategy, originalSetMethod, equality, equalityReference, rtn);
+            }
             else
             {
-                instructions = ImplementWrapped_OnChange_ComplexType(msil, strategy, originalSetMethod, equality, equalityReference, rtn);
+#warning Placeholder code!
+                instructions = new[] {
+                    msil.Create(OpCodes.Ldarg_0),
+                    msil.Create(OpCodes.Ldarg_1),
+                    msil.Create(OpCodes.Call, originalSetMethod),
+                };
             };
 
             return instructions
@@ -193,7 +201,98 @@ namespace Mathtone.MIST.Processors {
             };
         }
 
-        private static IEnumerable<Instruction> ImplementWrapped_OnChange_ComplexType(ILProcessor msil, ImplementationStrategy strategy, MethodDefinition originalSetMethod, MethodReference equality, MethodDefinition equalityReference, Instruction rtn)
+        private static IEnumerable<Instruction> ImplementWrapped_OnChange_NullableValueType(ILProcessor msil, ImplementationStrategy strategy, MethodDefinition originalSetMethod, MethodReference equality, MethodDefinition equalityReference, Instruction rtn)
+        {
+
+            //Register needed variables
+            var V_0 = new VariableDefinition(strategy.Property.PropertyType);
+            msil.Body.Variables.Add(V_0);
+            var V_1 = new VariableDefinition(strategy.Property.PropertyType);
+            msil.Body.Variables.Add(V_1);
+
+            var propertyTypeDefinition = strategy.Property.PropertyType.Resolve();
+            var propertyTypeModule = propertyTypeDefinition.Module;
+
+            var intType = strategy.Property.Module.ImportReference(typeof(int));
+            var intReference = intType.Resolve();// propertyTypeModule.TypeSystem.Int32;
+
+            var get_HasValueDefinition = propertyTypeDefinition.Methods.Single(m => m.Name == "get_HasValue");
+            var get_HasValueReference = strategy.Property.Module
+                .ImportReference(get_HasValueDefinition)
+                .MakeGeneric(intReference);
+
+            var GetValueOrDefaultDefinition = propertyTypeDefinition.Methods.Single(m => m.Name == "GetValueOrDefault" && m.Parameters.Count == 0);
+            var GetValueOrDefaultReference = strategy.Property.Module
+                .ImportReference(GetValueOrDefaultDefinition)
+                .MakeGeneric(intReference);
+
+
+            ////var GetValueOrDefaultBaseMethod = SeekMethod(propertyType, a => a.Name == "GetValueOrDefault" && a.Parameters.Count == 0);
+            ////var GetValueOrDefaultMethod = strategy.Property.Module.ImportReference(GetValueOrDefaultBaseMethod);
+            ////var getValueOrDefaultReference = GetValueOrDefaultBaseMethod.Resolve();
+            //var GetValueOrDefaultDefinition = propertyTypeDefinition.Methods.Single(m => m.Name == "GetValueOrDefault" && m.Parameters.Count == 0);
+            //var GetValueOrDefaultReference = GetValueOrDefaultDefinition.Module.ImportReference(GetValueOrDefaultDefinition);
+            //if (propertyTypeDefinition.BaseType.IsGenericInstance)
+            //{
+            //    var baseTypeInstance = (GenericInstanceType)propertyTypeDefinition.BaseType;
+            //    GetValueOrDefaultReference = GetValueOrDefaultReference.MakeGeneric(baseTypeInstance.GenericArguments.ToArray());
+            //}
+
+
+#warning Exact value-type should be derived from PropertyType, only non-nullable
+            var V_2 = new VariableDefinition(intType);
+            msil.Body.Variables.Add(V_2);
+
+            //Code working for nullable ValueTypes
+            var IL_0027 = new[]
+            {
+                msil.Create(OpCodes.Ldloca_S, V_0),            
+                msil.Create(OpCodes.Call, GetValueOrDefaultReference),  
+                msil.Create(OpCodes.Stloc_2),
+                msil.Create(OpCodes.Ldloca_S, V_2),                
+                msil.Create(OpCodes.Ldloc_1),
+                msil.Create(OpCodes.Box, strategy.Property.PropertyType),
+                msil.Create(equalityReference.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, equality),
+                msil.Create(OpCodes.Ldc_I4_0),
+                msil.Create(OpCodes.Ceq),
+            };
+            var IL_003f = new[]
+            {
+                msil.Create(OpCodes.Brfalse_S, rtn),
+            };
+
+            return new[] {
+                msil.Create(OpCodes.Nop),
+
+                //V_0 = Property-Get
+                msil.Create(OpCodes.Ldarg_0),
+                msil.Create(OpCodes.Call, strategy.Property.GetMethod),
+                msil.Create(OpCodes.Stloc_0),
+
+                //Original Property-Set = value
+                msil.Create(OpCodes.Ldarg_0),
+                msil.Create(OpCodes.Ldarg_1),
+                msil.Create(OpCodes.Call, originalSetMethod),
+
+                //V_1 = Property-Get
+                msil.Create(OpCodes.Nop),
+                msil.Create(OpCodes.Ldarg_0),
+                msil.Create(OpCodes.Call, strategy.Property.GetMethod),
+                msil.Create(OpCodes.Stloc_1),
+
+                //if (!V_0?.Equals(V_1) ?? (V_1 != null))
+                msil.Create(OpCodes.Ldloca_S, V_0),             
+                msil.Create(OpCodes.Call, get_HasValueReference),            
+                msil.Create(OpCodes.Brtrue_S, IL_0027.First()), 
+                msil.Create(OpCodes.Ldloca_S, V_1),             
+                msil.Create(OpCodes.Call, get_HasValueReference),            
+                msil.Create(OpCodes.Brtrue_S, IL_003f.First()),      
+            }
+            .Concat(IL_0027)
+            .Concat(IL_003f);
+        }
+
+        private static IEnumerable<Instruction> ImplementWrapped_OnChange_ReferenceType(ILProcessor msil, ImplementationStrategy strategy, MethodDefinition originalSetMethod, MethodReference equality, MethodDefinition equalityReference, Instruction rtn)
         {
             //Register needed variables
             var boolType = strategy.Property.Module.ImportReference(typeof(bool));
