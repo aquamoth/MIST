@@ -255,15 +255,17 @@ namespace Mathtone.MIST.Tests {
 			notifier.OnSetString = "Value";
 			notifier.OnSetInt = 1;
 			Assert.AreEqual(2, notifier.ChangeCount);
-			//Assert.Fail("Support intentionally removed in v2?");
 		}
 
 		[TestMethod]
 		public void OnChange_calls_NotifyTarget_with_two_arguments() {
-			Assert.Fail("Support intentionally removed in v2?");
-		}
+            var notifier = new NotifierWithTwoArguments();
+            notifier.OnChangeString = "Value";
+            notifier.OnChangeInt = 1;
+            Assert.AreEqual(2, notifier.ChangeCount);
+        }
 
-		[TestMethod]
+        [TestMethod]
 		public void OnSet_calls_NotifyTarget_for_multiple_properties() {
 			var expectedChanges = new[] { "Value1", "Value2", "Value3", "Value1", "Value2", "Value3" };
 
